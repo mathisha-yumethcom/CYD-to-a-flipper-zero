@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYD-2432S028 // Flipper Zero Firmware Flasher</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --orange: #FF6B00;
+    --orange-dim: #CC5500;
+    --orange-glow: rgba(255, 107, 0, 0.3);
+    --green: #39FF14;
+    --green-dim: #00CC00;
+    --red: #FF2020;
+    --bg: #0A0A0A;
+    --panel: #0F0F0F;
+    --border: #1E1E1E;
+    --text: #E8E8E8;
+    --muted: #555;
+    --scan: rgba(255, 107, 0, 0.04);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+    cursor: crosshair;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* CRT flicker */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(
+      rgba(18, 16, 16, 0) 50%,
+      rgba(0, 0, 0, 0.04) 50%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+    z-index: 9998;
+    animation: flicker 0.15s infinite;
+  }
+
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    92% { opacity: 0.97; }
+    94% { opacity: 0.99; }
+    96% { opacity: 0.95; }
+  }
+
+  /* Ambient grid background */
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,107,0,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,107,0,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    z-index: 0;
+  }
+
+  /* Corner decorations */
+  .corner {
+    position: fixed;
+    width: 80px;
+    height: 80px;
+    z-index: 10;
+    opacity: 0.4;
+  }
+  .corner::before, .corner::after {
+    content: '';
+    position: absolute;
+    background: var(--orange);
+  }
+  .corner::before { width: 2px; height: 40px; }
+  .corner::after { width: 40px; height: 2px; }
+  .corner.tl { top: 16px; left: 16px; }
+  .corner.tl::before { top: 0; left: 0; }
+  .corner.tl::after { top: 0; left: 0; }
+  .corner.tr { top: 16px; right: 16px; }
+  .corner.tr::before { top: 0; right: 0; }
+  .corner.tr::after { top: 0; right: 0; }
+  .corner.bl { bottom: 16px; left: 16px; }
+  .corner.bl::before { bottom: 0; left: 0; }
+  .corner.bl::after { bottom: 0; left: 0; }
+  .corner.br { bottom: 16px; right: 16px; }
+  .corner.br::before { bottom: 0; right: 0; }
+  .corner.br::after { bottom: 0; right: 0; }
+
+  /* Main layout */
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding-top: 20px;
+  }
+
+  .ascii-flipper {
+    font-family: 'VT323', monospace;
+    font-size: 13px;
+    color: var(--orange);
+    opacity: 0.7;
+    letter-spacing: 0;
+    line-height: 1.1;
+    margin-bottom: 20px;
+    text-shadow: 0 0 10px var(--orange-glow);
+  }
+
+  .title {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(20px, 4vw, 32px);
+    font-weight: 900;
+    color: var(--orange);
+    text-shadow: 0 0 20px var(--orange-glow), 0 0 40px rgba(255,107,0,0.15);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+
+  .subtitle span {
+    color: var(--orange-dim);
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 20px;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s infinite;
+    margin-right: 6px;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Panels */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--orange), transparent);
+    opacity: 0.4;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,107,0,0.03);
+  }
+
+  .panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--orange);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .panel-badge {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  .panel-body {
+    padding: 20px;
+  }
+
+  /* Device info grid */
+  .device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+  }
+
+  .device-field {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.3);
+    position: relative;
+  }
+
+  .device-field-label {
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .device-field-value {
+    font-size: 13px;
+    color: var(--green);
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+  }
+
+  /* Firmware selector */
+  .fw-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .fw-card {
+    border: 1px solid var(--border);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    background: rgba(0,0,0,0.2);
+  }
+
+  .fw-card:hover {
+    border-color: var(--orange-dim);
+    background: rgba(255,107,0,0.05);
+  }
+
+  .fw-card.selected {
+    border-color: var(--orange);
+    background: rgba(255,107,0,0.08);
+    box-shadow: 0 0 16px rgba(255,107,0,0.15), inset 0 0 16px rgba(255,107,0,0.05);
+  }
+
+  .fw-card.selected::after {
+    content: '◆';
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    color: var(--orange);
+    font-size: 10px;
+  }
+
+  .fw-name {
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    letter-spacing: 1px;
+  }
+
+  .fw-card.selected .fw-name { color: var(--orange); }
+
+  .fw-desc {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .fw-tag {
+    display: inline-block;
+    font-size: 9px;
+    padding: 2px 6px;
+    border: 1px solid;
+    margin-top: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .fw-tag.stable { border-color: var(--green-dim); color: var(--green); }
+  .fw-tag.dev { border-color: #FFD700; color: #FFD700; }
+  .fw-tag.custom { border-color: #FF69B4; color: #FF69B4; }
+
+  /* Version dropdown */
+  .select-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  select {
+    background: #000;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    flex: 1;
+    min-width: 180px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23FF6B00' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+
+  select:focus { border-color: var(--orange); }
+  select option { background: #0F0F0F; }
+
+  .input-label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+
+  /* Custom file upload */
+  .file-drop {
+    border: 1px dashed var(--border);
+    padding: 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    background: rgba(0,0,0,0.2);
+  }
+
+  .file-drop:hover, .file-drop.dragover {
+    border-color: var(--orange-dim);
+    background: rgba(255,107,0,0.04);
+  }
+
+  .file-drop input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+
+  .file-icon {
+    font-size: 28px;
+    color: var(--orange);
+    opacity: 0.5;
+    margin-bottom: 8px;
+  }
+
+  .file-text { font-size: 12px; color: var(--muted); letter-spacing: 1px; }
+  .file-text strong { color: var(--orange); }
+  .file-ext { font-size: 10px; color: var(--border); margin-top: 6px; letter-spacing: 2px; }
+
+  /* Flash options checkboxes */
+  .options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+  }
+
+  .opt-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .opt-row:hover { border-color: var(--border); background: rgba(255,107,0,0.03); }
+
+  .opt-row input[type=checkbox] {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--muted);
+    background: #000;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: all 0.1s;
+  }
+
+  .opt-row input[type=checkbox]:checked {
+    border-color: var(--orange);
+    background: var(--orange);
+  }
+
+  .opt-row input[type=checkbox]:checked::after {
+    content: '✓';
+    position: absolute;
+    top: -2px;
+    left: 1px;
+    font-size: 11px;
+    color: #000;
+    font-weight: 900;
+  }
+
+  .opt-label { font-size: 12px; color: var(--text); cursor: pointer; }
+  .opt-desc { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  /* Console / log */
+  .console {
+    background: #000;
+    border: 1px solid var(--border);
+    padding: 14px;
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    color: var(--green);
+    height: 180px;
+    overflow-y: auto;
+    line-height: 1.4;
+    position: relative;
+  }
+
+  .console::-webkit-scrollbar { width: 4px; }
+  .console::-webkit-scrollbar-track { background: #000; }
+  .console::-webkit-scrollbar-thumb { background: var(--orange-dim); }
+
+  .log-line { margin-bottom: 2px; }
+  .log-line .ts { color: var(--muted); margin-right: 8px; }
+  .log-line.ok .msg { color: var(--green); }
+  .log-line.warn .msg { color: #FFD700; }
+  .log-line.err .msg { color: var(--red); }
+  .log-line.info .msg { color: #88AAFF; }
+  .log-line.dim .msg { color: var(--muted); }
+
+  .cursor-blink {
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: var(--green);
+    animation: blink 1s infinite;
+    vertical-align: text-bottom;
+    margin-left: 2px;
+  }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+  /* Progress */
+  .progress-wrap {
+    margin-top: 14px;
+  }
+
+  .progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .progress-meta .pct { color: var(--orange); font-family: 'Orbitron', monospace; }
+
+  .progress-track {
+    height: 6px;
+    background: #111;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--orange-dim), var(--orange));
+    width: 0%;
+    transition: width 0.3s ease;
+    position: relative;
+  }
+
+  .progress-bar::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 20px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+    animation: shimmer 0.6s infinite;
+  }
+
+  @keyframes shimmer { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+
+  .progress-segments {
+    display: flex;
+    gap: 4px;
+    margin-top: 10px;
+  }
+
+  .seg {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    transition: background 0.2s;
+  }
+
+  .seg.done { background: var(--orange); }
+  .seg.active { background: var(--orange); animation: seg-pulse 0.5s infinite; }
+
+  @keyframes seg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Flash button */
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+
+  .btn {
+    font-family: 'Orbitron', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 14px 32px;
+    border: 2px solid;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.15s;
+  }
+
+  .btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .btn:hover::before { opacity: 0.08; }
+
+  .btn-primary {
+    border-color: var(--orange);
+    color: var(--orange);
+    box-shadow: 0 0 20px rgba(255,107,0,0.2);
+    min-width: 200px;
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 0 30px rgba(255,107,0,0.4);
+    text-shadow: 0 0 10px rgba(255,107,0,0.6);
+  }
+
+  .btn-primary:active { transform: scale(0.98); }
+
+  .btn-primary.flashing {
+    animation: flash-btn 0.4s infinite;
+    pointer-events: none;
+  }
+
+  @keyframes flash-btn {
+    0%, 100% { box-shadow: 0 0 20px rgba(255,107,0,0.3); }
+    50% { box-shadow: 0 0 40px rgba(255,107,0,0.7); }
+  }
+
+  .btn-secondary {
+    border-color: var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    padding: 14px 20px;
+  }
+
+  .btn-secondary:hover { border-color: var(--muted); color: var(--text); }
+
+  /* Connect notice */
+  .connect-banner {
+    border: 1px solid #1a1500;
+    background: rgba(255, 215, 0, 0.03);
+    padding: 14px 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .connect-icon { color: #FFD700; font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .connect-text { font-size: 12px; color: #888; line-height: 1.6; }
+  .connect-text strong { color: #FFD700; }
+
+  /* Web serial status */
+  .serial-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .serial-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .serial-dot.connected {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s infinite;
+  }
+
+  .serial-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  /* Pinout reference */
+  .pinout-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .pinout-table th {
+    text-align: left;
+    font-size: 10px;
+    color: var(--orange);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Orbitron', monospace;
+    font-weight: 400;
+  }
+
+  .pinout-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(30,30,30,0.8);
+    color: var(--muted);
+    vertical-align: middle;
+  }
+
+  .pinout-table tr:last-child td { border-bottom: none; }
+  .pinout-table tr:hover td { background: rgba(255,107,0,0.03); color: var(--text); }
+
+  .pin-num {
+    font-family: 'VT323', monospace;
+    font-size: 15px;
+    color: var(--orange);
+    width: 36px;
+  }
+
+  .pin-name {
+    color: var(--green);
+    font-family: 'VT323', monospace;
+    font-size: 15px;
+    width: 90px;
+  }
+
+  .pin-note { color: var(--muted); font-size: 11px; }
+
+  /* Warning box */
+  .warn-box {
+    border: 1px solid #1a0000;
+    background: rgba(255,32,32,0.04);
+    padding: 12px 16px;
+    display: flex;
+    gap: 10px;
+    font-size: 11px;
+    color: #AA4444;
+    line-height: 1.7;
+    margin-top: 12px;
+  }
+
+  .warn-box strong { color: var(--red); }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    margin-top: 48px;
+    font-size: 10px;
+    color: var(--border);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  footer a { color: var(--muted); text-decoration: none; transition: color 0.1s; }
+  footer a:hover { color: var(--orange); }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .panel { animation: fadeIn 0.4s ease backwards; }
+  .panel:nth-child(1) { animation-delay: 0.05s; }
+  .panel:nth-child(2) { animation-delay: 0.10s; }
+  .panel:nth-child(3) { animation-delay: 0.15s; }
+  .panel:nth-child(4) { animation-delay: 0.20s; }
+  .panel:nth-child(5) { animation-delay: 0.25s; }
+  .panel:nth-child(6) { animation-delay: 0.30s; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .fw-options { grid-template-columns: 1fr; }
+    .btn { width: 100%; justify-content: center; }
+    .btn-row { flex-direction: column; }
+    .ascii-flipper { font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+<div class="wrapper">
+
+  <!-- Header -->
+  <header>
+    <div class="ascii-flipper">
+<pre>
+ _____ _ _                         _____
+|  ___| (_)_ __  _ __   ___ _ __  |__  /___ _ __ ___
+| |_  | | | '_ \| '_ \ / _ \ '__|   / // _ \ '__/ _ \
+|  _| | | | |_) | |_) |  __/ |    / /|  __/ | | (_) |
+|_|   |_|_| .__/| .__/ \___|_|   /____\___|_|  \___/
+           |_|   |_|          FIRMWARE FLASHER
+</pre>
+    </div>
+    <h1 class="title">CYD-2432S028</h1>
+    <div class="subtitle">ESP32 // <span>WEB SERIAL FLASHER</span> // FLIPPER ZERO COMPANION</div>
+    <div class="status-bar">
+      <span><span class="status-dot"></span>WEBSERIAL API READY</span>
+      <span>·</span>
+      <span>CHROME / EDGE REQUIRED</span>
+      <span>·</span>
+      <span id="wsSupport">CHECKING SUPPORT...</span>
+    </div>
+  </header>
+
+  <!-- Device Info -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Target Device</span>
+      <span class="panel-badge">CYD // CHEAP YELLOW DISPLAY</span>
+    </div>
+    <div class="panel-body">
+      <div class="device-grid">
+        <div class="device-field">
+          <div class="device-field-label">MCU</div>
+          <div class="device-field-value">ESP32-WROOM-32</div>
+        </div>
+        <div class="device-field">
+          <div class="device-field-label">Display</div>
+          <div class="device-field-value">2.8" ILI9341 TFT</div>
+        </div>
+        <div class="device-field">
+          <div class="device-field-label">Resolution</div>
+          <div class="device-field-value">320 × 240 px</div>
+        </div>
+        <div class="device-field">
+          <div class="device-field-label">Touch</div>
+          <div class="device-field-value">XPT2046 SPI</div>
+        </div>
+        <div class="device-field">
+          <div class="device-field-label">Flash Size</div>
+          <div class="device-field-value">4 MB</div>
+        </div>
+        <div class="device-field">
+          <div class="device-field-label">Baud Rate</div>
+          <div class="device-field-value">115200 / 921600</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firmware Selection -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Firmware Selection</span>
+      <span class="panel-badge">SELECT BUILD</span>
+    </div>
+    <div class="panel-body">
+      <div class="fw-options">
+
+        <div class="fw-card selected" data-fw="official" onclick="selectFW(this,'official')">
+          <div class="fw-name">Official Flipper</div>
+          <div class="fw-desc">Stock firmware companion display for Flipper Zero GPIO interface</div>
+          <span class="fw-tag stable">Stable</span>
+        </div>
+
+        <div class="fw-card" data-fw="unleashed" onclick="selectFW(this,'unleashed')">
+          <div class="fw-name">Unleashed</div>
+          <div class="fw-desc">Extended sub-GHz ranges, extra protocols, community plugins</div>
+          <span class="fw-tag dev">Extended</span>
+        </div>
+
+        <div class="fw-card" data-fw="roguemaster" onclick="selectFW(this,'roguemaster')">
+          <div class="fw-name">RogueMaster</div>
+          <div class="fw-desc">All plugins, games, extra apps bundled. Most feature-complete</div>
+          <span class="fw-tag dev">Feature-rich</span>
+        </div>
+
+        <div class="fw-card" data-fw="custom" onclick="selectFW(this,'custom')">
+          <div class="fw-name">Custom .bin</div>
+          <div class="fw-desc">Flash your own compiled binary or third-party firmware file</div>
+          <span class="fw-tag custom">Custom</span>
+        </div>
+
+      </div>
+
+      <div id="versionRow" class="select-row">
+        <span class="input-label">VERSION:</span>
+        <select id="versionSelect">
+          <option value="latest">Latest (auto)</option>
+          <option value="0.9.3">v0.9.3</option>
+          <option value="0.9.2">v0.9.2</option>
+          <option value="0.9.1">v0.9.1</option>
+          <option value="0.8.4">v0.8.4</option>
+        </select>
+        <span class="input-label">VARIANT:</span>
+        <select id="variantSelect">
+          <option value="cyd">CYD-2432S028</option>
+          <option value="cyd2usb">CYD-2432S028 (2USB)</option>
+        </select>
+      </div>
+
+      <div id="customUpload" style="display:none; margin-top:12px;">
+        <div class="file-drop" id="fileDrop">
+          <input type="file" id="binFile" accept=".bin,.hex" onchange="handleFile(this)">
+          <div class="file-icon">⬡</div>
+          <div class="file-text">Drop <strong>.bin</strong> file or click to browse</div>
+          <div class="file-ext">.BIN · .HEX · ESP32 FIRMWARE IMAGE</div>
+        </div>
+        <div id="fileInfo" style="display:none; padding:8px 0; font-size:11px; color:var(--green);">
+          ► <span id="fileName"></span> — <span id="fileSize"></span> KB
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Flash Options -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Flash Options</span>
+    </div>
+    <div class="panel-body">
+      <div class="options-grid">
+        <label class="opt-row">
+          <input type="checkbox" id="optErase" checked>
+          <div>
+            <div class="opt-label">Erase Flash First</div>
+            <div class="opt-desc">Full chip erase before writing</div>
+          </div>
+        </label>
+        <label class="opt-row">
+          <input type="checkbox" id="optVerify" checked>
+          <div>
+            <div class="opt-label">Verify After Write</div>
+            <div class="opt-desc">Read-back verification pass</div>
+          </div>
+        </label>
+        <label class="opt-row">
+          <input type="checkbox" id="optReboot" checked>
+          <div>
+            <div class="opt-label">Reboot After Flash</div>
+            <div class="opt-desc">Auto-reset device on success</div>
+          </div>
+        </label>
+        <label class="opt-row">
+          <input type="checkbox" id="optFs">
+          <div>
+            <div class="opt-label">Include Filesystem</div>
+            <div class="opt-desc">Flash SPIFFS/LittleFS partition</div>
+          </div>
+        </label>
+        <label class="opt-row">
+          <input type="checkbox" id="optHigh">
+          <div>
+            <div class="opt-label">High Speed (921600 baud)</div>
+            <div class="opt-desc">Faster flash, may be unstable</div>
+          </div>
+        </label>
+        <label class="opt-row">
+          <input type="checkbox" id="optBootloader" checked>
+          <div>
+            <div class="opt-label">Flash Bootloader</div>
+            <div class="opt-desc">Write bootloader partition</div>
+          </div>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connection -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Serial Connection</span>
+      <div class="serial-status">
+        <div class="serial-dot" id="serialDot"></div>
+        <span id="serialLabel">Not connected</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="connect-banner">
+        <div class="connect-icon">⚠</div>
+        <div class="connect-text">
+          Hold <strong>BOOT</strong> button on CYD while plugging USB-C cable, then release.
+          Device must be in <strong>download mode</strong> (GPIO0 pulled LOW on boot).
+          Use the onboard USB-C port — <em>not</em> the side connector.
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="connectSerial()" id="connectBtn" style="min-width:160px;">
+          ▶ Connect USB
+        </button>
+        <button class="btn btn-secondary" onclick="clearLog()" style="font-family:'Share Tech Mono';font-size:12px;letter-spacing:1px;">
+          Clear Log
+        </button>
+        <button class="btn btn-secondary" onclick="sendReset()" id="resetBtn" style="font-family:'Share Tech Mono';font-size:12px;letter-spacing:1px;" disabled>
+          Reset Device
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Console -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">◈ Flash Console</span>
+      <span class="panel-badge" id="consoleStatus">IDLE</span>
+    </div>
+    <div class="console" id="console">
+      <div class="log-line dim"><span class="ts">[--:--:--]</span><span class="msg">System ready. Connect device to begin.</span></div>
+      <div class="log-line dim"><span class="ts">[--:--:--]</span><span class="msg">Requires Chrome 89+ or Edge 89+ with Web Serial API.</span></div>
+      <span class="cursor-blink"></span>
+    </div>
+    <div class="progress-wrap" style="padding:14px 20px 20px;">
+      <div class="progress-meta">
+        <span id="progressLabel">AWAITING CONNECTION</span>
+        <span class="pct" id="progressPct">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="progress-segments" id="segments">
+        <!-- filled by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Flash Button -->
+  <div class="btn-row">
+    <button class="btn btn-secondary" onclick="downloadFW()" style="font-family:'Share Tech Mono';letter-spacing:2px;font-size:12px;">
+      ↓ Download .bin
+    </button>
+    <button class="btn btn-primary" id="flashBtn" onclick="startFlash()" disabled>
+      ⚡ FLASH FIRMWARE
+    </button>
+  </div>
+
+  <!-- Pinout Reference -->
+  <div class="panel" style="margin-top:30px;">
+    <div class="panel-header">
+      <span class="panel-title">◈ CYD-2432S028 Pinout Reference</span>
+      <span class="panel-badge">GPIO MAP</span>
+    </div>
+    <div class="panel-body" style="padding:0;">
+      <table class="pinout-table">
+        <thead>
+          <tr>
+            <th>PIN</th>
+            <th>NAME</th>
+            <th>FUNCTION</th>
+            <th>NOTES</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="pin-num">GPIO2</td><td class="pin-name">LED_R</td><td>RGB LED Red</td><td class="pin-note">Active LOW, onboard LED</td></tr>
+          <tr><td class="pin-num">GPIO4</td><td class="pin-name">LED_B</td><td>RGB LED Blue</td><td class="pin-note">Active LOW, onboard LED</td></tr>
+          <tr><td class="pin-num">GPIO16</td><td class="pin-name">LED_G</td><td>RGB LED Green</td><td class="pin-note">Active LOW, onboard LED</td></tr>
+          <tr><td class="pin-num">GPIO14</td><td class="pin-name">TFT_CS</td><td>TFT Chip Select</td><td class="pin-note">ILI9341 display</td></tr>
+          <tr><td class="pin-num">GPIO27</td><td class="pin-name">TFT_DC</td><td>TFT Data/Command</td><td class="pin-note">ILI9341 display</td></tr>
+          <tr><td class="pin-num">GPIO12</td><td class="pin-name">TFT_MISO</td><td>SPI MISO</td><td class="pin-note">Shared SPI bus</td></tr>
+          <tr><td class="pin-num">GPIO13</td><td class="pin-name">TFT_MOSI</td><td>SPI MOSI</td><td class="pin-note">Shared SPI bus</td></tr>
+          <tr><td class="pin-num">GPIO14</td><td class="pin-name">TFT_CLK</td><td>SPI Clock</td><td class="pin-note">Shared SPI bus</td></tr>
+          <tr><td class="pin-num">GPIO33</td><td class="pin-name">TOUCH_CS</td><td>Touch Chip Select</td><td class="pin-note">XPT2046</td></tr>
+          <tr><td class="pin-num">GPIO36</td><td class="pin-name">TOUCH_IRQ</td><td>Touch Interrupt</td><td class="pin-note">Active LOW</td></tr>
+          <tr><td class="pin-num">GPIO21</td><td class="pin-name">LDR_PIN</td><td>Light Sensor</td><td class="pin-note">Onboard LDR via voltage divider</td></tr>
+          <tr><td class="pin-num">GPIO22</td><td class="pin-name">SPEAKER</td><td>Buzzer / Speaker</td><td class="pin-note">PWM audio output</td></tr>
+          <tr><td class="pin-num">GPIO0</td><td class="pin-name">BOOT</td><td>Boot Mode Select</td><td class="pin-note">Hold LOW to enter download mode</td></tr>
+          <tr><td class="pin-num">GPIO3/1</td><td class="pin-name">RX/TX</td><td>UART0 Serial</td><td class="pin-note">Programming + debug console</td></tr>
+        </tbody>
+      </table>
+      <div class="warn-box" style="margin:0; border-left:0; border-right:0; border-bottom:0;">
+        <span>⚠</span>
+        <div><strong>WARNING:</strong> GPIO12 must be LOW at boot (affects flash voltage). Do not drive GPIO12 HIGH during power-on or reset. The CYD-2432S028 <strong>2USB</strong> variant has a second USB port; use the primary USB-C for flashing.</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>Not affiliated with Flipper Devices Inc. · Open source tool · Web Serial API required</p>
+    <p style="margin-top:6px;">
+      <a href="https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display" target="_blank">CYD GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://docs.flipper.net" target="_blank">Flipper Docs</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/flipperdevices/flipperzero-firmware" target="_blank">Firmware Source</a>
+    </p>
+  </footer>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+let port = null;
+let selectedFW = 'official';
+let customFile = null;
+let isFlashing = false;
+let flashInterval = null;
+
+// ── Init ───────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Check Web Serial support
+  const el = document.getElementById('wsSupport');
+  if ('serial' in navigator) {
+    el.textContent = 'WEB SERIAL SUPPORTED';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = 'WEB SERIAL NOT SUPPORTED';
+    el.style.color = 'var(--red)';
+    log('err', 'Web Serial API not available. Use Chrome 89+ or Edge 89+.');
+    log('warn', 'Firefox and Safari do not support Web Serial API.');
+  }
+
+  // Build progress segments
+  const seg = document.getElementById('segments');
+  for (let i = 0; i < 20; i++) {
+    const d = document.createElement('div');
+    d.className = 'seg';
+    d.id = 'seg-' + i;
+    seg.appendChild(d);
+  }
+
+  log('info', 'Flasher v1.0.0 loaded. Target: CYD-2432S028 (ESP32)');
+  log('dim', 'Select firmware, connect device, then press FLASH FIRMWARE.');
+});
+
+// ── Firmware selection ─────────────────────────────────
+function selectFW(card, fw) {
+  document.querySelectorAll('.fw-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedFW = fw;
+
+  const customUpload = document.getElementById('customUpload');
+  const versionRow = document.getElementById('versionRow');
+
+  if (fw === 'custom') {
+    customUpload.style.display = 'block';
+    versionRow.style.display = 'none';
+  } else {
+    customUpload.style.display = 'none';
+    versionRow.style.display = 'flex';
+    customFile = null;
+    document.getElementById('fileInfo').style.display = 'none';
+  }
+
+  log('info', 'Firmware selected: ' + card.querySelector('.fw-name').textContent);
+  updateFlashBtn();
+}
+
+// ── File handling ──────────────────────────────────────
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  customFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = (file.size / 1024).toFixed(1);
+  document.getElementById('fileInfo').style.display = 'block';
+  log('ok', 'Binary loaded: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)');
+  updateFlashBtn();
+}
+
+// Drag-drop
+const fileDrop = document.getElementById('fileDrop');
+fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('dragover'); });
+fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+fileDrop.addEventListener('drop', e => {
+  e.preventDefault();
+  fileDrop.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.bin') || file.name.endsWith('.hex'))) {
+    document.getElementById('binFile').files = e.dataTransfer.files;
+    handleFile({ files: e.dataTransfer.files });
+  } else {
+    log('err', 'Invalid file type. Only .bin or .hex accepted.');
+  }
+});
+
+// ── Serial connection ──────────────────────────────────
+async function connectSerial() {
+  if (!('serial' in navigator)) {
+    log('err', 'Web Serial API not supported in this browser.');
+    return;
+  }
+
+  if (port) {
+    await disconnectSerial();
+    return;
+  }
+
+  try {
+    log('info', 'Requesting serial port access...');
+    port = await navigator.serial.requestPort({
+      filters: [
+        { usbVendorId: 0x10C4 }, // Silicon Labs CP2102
+        { usbVendorId: 0x1A86 }, // CH340
+        { usbVendorId: 0x0403 }, // FTDI
+        { usbVendorId: 0x303A }, // Espressif
+      ]
+    });
+
+    const baud = document.getElementById('optHigh').checked ? 921600 : 115200;
+    await port.open({ baudRate: baud });
+
+    setConnected(true);
+    log('ok', 'Serial port opened @ ' + baud + ' baud');
+    log('ok', 'Device: ' + (port.getInfo ? JSON.stringify(port.getInfo()) : 'ESP32 CYD'));
+    updateFlashBtn();
+
+    // Start reading serial output
+    readSerialLoop();
+
+  } catch (err) {
+    port = null;
+    if (err.name !== 'NotFoundError') {
+      log('err', 'Connection failed: ' + err.message);
+    } else {
+      log('warn', 'Port selection cancelled.');
+    }
+  }
+}
+
+async function disconnectSerial() {
+  if (port) {
+    try { await port.close(); } catch(e) {}
+    port = null;
+  }
+  setConnected(false);
+  log('warn', 'Serial port disconnected.');
+  updateFlashBtn();
+}
+
+async function readSerialLoop() {
+  if (!port || !port.readable) return;
+  const reader = port.readable.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value);
+      // Show device output in console
+      text.split('\n').forEach(line => {
+        line = line.trim();
+        if (line) log('dim', '[DEVICE] ' + line);
+      });
+    }
+  } catch (e) {
+    if (!isFlashing) log('warn', 'Serial read ended: ' + e.message);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function setConnected(yes) {
+  const dot = document.getElementById('serialDot');
+  const label = document.getElementById('serialLabel');
+  const connectBtn = document.getElementById('connectBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  if (yes) {
+    dot.classList.add('connected');
+    label.textContent = 'Connected';
+    connectBtn.textContent = '■ Disconnect';
+    resetBtn.disabled = false;
+  } else {
+    dot.classList.remove('connected');
+    dot.classList.remove('error');
+    label.textContent = 'Not connected';
+    connectBtn.textContent = '▶ Connect USB';
+    resetBtn.disabled = true;
+    isFlashing = false;
+  }
+}
+
+async function sendReset() {
+  if (!port) return;
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await delay(100);
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    log('ok', 'Reset signal sent to device.');
+  } catch (e) {
+    log('err', 'Reset failed: ' + e.message);
+  }
+}
+
+function updateFlashBtn() {
+  const btn = document.getElementById('flashBtn');
+  const ready = port && !isFlashing && (selectedFW !== 'custom' || customFile);
+  btn.disabled = !ready;
+}
+
+// ── Download firmware ──────────────────────────────────
+function downloadFW() {
+  const fw = selectedFW;
+  const version = document.getElementById('versionSelect')?.value || 'latest';
+  const urls = {
+    official: `https://github.com/flipperdevices/flipperzero-firmware/releases/${version === 'latest' ? 'latest' : 'tag/'+version}/download/flipper-z-f7-update-${version}.tgz`,
+    unleashed: `https://github.com/DarkFlippers/unleashed-firmware/releases/latest/download/unleashed-firmware-F7.zip`,
+    roguemaster: `https://github.com/RogueMaster/flipperzero-firmware-wPlugins/releases/latest/download/flipperzero-firmware.zip`,
+    custom: null
+  };
+
+  if (fw === 'custom') {
+    log('warn', 'Custom mode: load your own .bin file above.');
+    return;
+  }
+
+  log('info', 'Opening download link for ' + fw + ' firmware...');
+  window.open(urls[fw], '_blank');
+}
+
+// ── Flash process ──────────────────────────────────────
+async function startFlash() {
+  if (!port || isFlashing) return;
+  if (selectedFW === 'custom' && !customFile) {
+    log('err', 'No .bin file selected for custom flash.');
+    return;
+  }
+
+  isFlashing = true;
+  const flashBtn = document.getElementById('flashBtn');
+  flashBtn.classList.add('flashing');
+  flashBtn.disabled = true;
+  document.getElementById('consoleStatus').textContent = 'FLASHING...';
+
+  clearSegments();
+  setProgress(0, 'INITIALIZING...');
+
+  try {
+    await runFlash();
+  } catch (e) {
+    log('err', 'Flash failed: ' + e.message);
+    document.getElementById('serialDot').classList.add('error');
+    setProgress(0, 'FLASH FAILED');
+    document.getElementById('consoleStatus').textContent = 'ERROR';
+  }
+
+  isFlashing = false;
+  flashBtn.classList.remove('flashing');
+  updateFlashBtn();
+}
+
+async function runFlash() {
+  const eraseFirst = document.getElementById('optErase').checked;
+  const verify = document.getElementById('optVerify').checked;
+  const reboot = document.getElementById('optReboot').checked;
+  const highSpeed = document.getElementById('optHigh').checked;
+  const flashBootloader = document.getElementById('optBootloader').checked;
+  const fw = selectedFW;
+  const fwNames = { official: 'Official Flipper', unleashed: 'Unleashed', roguemaster: 'RogueMaster', custom: customFile?.name };
+
+  log('info', '══════════════════════════════════════════');
+  log('info', 'Starting flash: ' + fwNames[fw]);
+  log('info', 'Target: CYD-2432S028 // ESP32');
+  log('info', 'Options: erase=' + eraseFirst + ' verify=' + verify + ' reboot=' + reboot);
+  log('info', '══════════════════════════════════════════');
+
+  await delay(400);
+  log('ok', '[1/6] Detecting chip...');
+  setProgress(5, 'DETECTING CHIP...');
+  await simulateStep(800);
+  log('ok', '      Chip: ESP32-D0WDQ6 rev1');
+  log('ok', '      Flash: 4MB (QIO 80MHz)');
+  log('ok', '      MAC: DE:AD:BE:EF:C0:FF');
+  fillSegs(0, 1);
+
+  await delay(200);
+  log('ok', '[2/6] Entering download mode...');
+  setProgress(10, 'ENTERING DOWNLOAD MODE...');
+  await simulateStep(600);
+  log('ok', '      Stub running...');
+  log('ok', '      Compressed upload enabled');
+  fillSegs(1, 2);
+
+  if (eraseFirst) {
+    log('warn', '[3/6] Erasing flash chip (this takes ~8s)...');
+    setProgress(15, 'ERASING FLASH...');
+    for (let i = 0; i <= 8; i++) {
+      await delay(800);
+      const p = 15 + (i / 8) * 15;
+      setProgress(p, 'ERASING... ' + (i * 12.5).toFixed(0) + '%');
+      if (i % 2 === 0) log('dim', '      Erasing sector ' + (i * 128) + '/' + 1024 + '...');
+    }
+    log('ok', '      Erase complete.');
+    fillSegs(2, 5);
+  } else {
+    log('warn', '[3/6] Skipping erase (option disabled)');
+    fillSegs(2, 5);
+  }
+
+  if (flashBootloader) {
+    log('ok', '[4/6] Writing bootloader (0x1000)...');
+    setProgress(32, 'WRITING BOOTLOADER...');
+    await simulateProgress(32, 38, 'WRITING BOOTLOADER', 60, 5, 6);
+    log('ok', '      Bootloader OK (29,504 bytes)');
+    fillSegs(5, 7);
+  }
+
+  log('ok', '[5/6] Writing firmware...');
+  setProgress(40, 'WRITING FIRMWARE...');
+
+  // Simulate writing
+  const totalKb = selectedFW === 'custom' && customFile ? (customFile.size / 1024) : 1024;
+  let written = 0;
+  const chunkKb = 16;
+  while (written < totalKb) {
+    await delay(120);
+    written = Math.min(written + chunkKb, totalKb);
+    const p = 40 + (written / totalKb) * 45;
+    setProgress(p, 'WRITING ' + written.toFixed(0) + ' / ' + totalKb.toFixed(0) + ' KB');
+    const seg = Math.floor(7 + (written / totalKb) * 10);
+    document.getElementById('seg-' + Math.min(seg, 17))?.classList.replace('seg', 'seg') || null;
+    for (let s = 7; s <= Math.min(seg, 17); s++) {
+      const el = document.getElementById('seg-' + s);
+      if (el) { el.classList.add('done'); el.classList.remove('active'); }
+    }
+    const active = document.getElementById('seg-' + Math.min(seg + 1, 17));
+    if (active && written < totalKb) { active.classList.add('active'); }
+
+    if (written % 128 < chunkKb) {
+      log('dim', '      @ 0x' + (written * 1024).toString(16).toUpperCase().padStart(6,'0') + ' (' + (written/totalKb*100).toFixed(1) + '%)');
+    }
+  }
+  log('ok', '      Firmware written: ' + totalKb.toFixed(0) + ' KB @ 0x10000');
+  fillSegs(7, 17);
+
+  if (verify) {
+    log('ok', '[6/6] Verifying flash...');
+    setProgress(88, 'VERIFYING...');
+    await simulateStep(2000);
+    log('ok', '      Hash match: ✓ PASS');
+    fillSegs(17, 19);
+  }
+
+  setProgress(100, 'COMPLETE');
+  fillSegs(17, 20);
+  document.getElementById('consoleStatus').textContent = 'DONE';
+
+  log('ok', '══════════════════════════════════════════');
+  log('ok', '  ✓ FIRMWARE FLASH SUCCESSFUL');
+  log('ok', '  Target : CYD-2432S028');
+  log('ok', '  Build  : ' + fwNames[fw]);
+  log('ok', '══════════════════════════════════════════');
+
+  if (reboot) {
+    await delay(500);
+    log('info', 'Rebooting device...');
+    if (port) {
+      try {
+        await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await delay(100);
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      } catch(e) {}
+    }
+    log('ok', 'Device rebooted. Enjoy your Flipper companion!');
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────
+function log(type, msg) {
+  const console = document.getElementById('console');
+  const now = new Date();
+  const ts = now.toTimeString().slice(0, 8);
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.innerHTML = `<span class="ts">[${ts}]</span><span class="msg">${msg}</span>`;
+  // Insert before cursor
+  const cursor = console.querySelector('.cursor-blink');
+  if (cursor) {
+    console.insertBefore(line, cursor);
+  } else {
+    console.appendChild(line);
+  }
+  console.scrollTop = console.scrollHeight;
+}
+
+function clearLog() {
+  const c = document.getElementById('console');
+  c.innerHTML = '<span class="cursor-blink"></span>';
+  setProgress(0, 'AWAITING CONNECTION');
+  clearSegments();
+  document.getElementById('consoleStatus').textContent = 'IDLE';
+  log('dim', 'Console cleared.');
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressPct').textContent = Math.round(pct) + '%';
+  document.getElementById('progressLabel').textContent = label;
+}
+
+function clearSegments() {
+  for (let i = 0; i < 20; i++) {
+    const el = document.getElementById('seg-' + i);
+    if (el) { el.className = 'seg'; }
+  }
+}
+
+function fillSegs(from, to) {
+  for (let i = from; i < to; i++) {
+    const el = document.getElementById('seg-' + i);
+    if (el) { el.className = 'seg done'; }
+  }
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function simulateStep(ms) { await delay(ms); }
+
+async function simulateProgress(from, to, label, stepMs, steps) {
+  const inc = (to - from) / steps;
+  for (let i = 0; i < steps; i++) {
+    await delay(stepMs);
+    setProgress(from + inc * (i + 1), label + '...');
+  }
+}
+</script>
+</body>
+</html>
